@@ -11,6 +11,7 @@ hoth_battle: "That armor's too strong for blasters!"
 visits_yoda: "Hey, that's my dinner!"
 fights_vader: "That's not true! That's impossible!"
 ```
+
 han.txt
 	meteor_worm: "All right, Chewie, let's get out of here!"
 	cloud_city: "This deal's getting worse all the time!"
