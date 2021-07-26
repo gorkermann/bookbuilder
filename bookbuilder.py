@@ -5,46 +5,42 @@ import argparse
 
 RE_CHAPTER_SEPARATOR = re.compile('//(.*)')
 
+def log(line):
+	with open('log.txt', 'a') as logfile:
+		logfile.write(line + '\n')
+
+	print(line)
+
 class Chapter:
-	def __init__(self, prefix, name, text):
+	def __init__(self, name, text):
 		if not name:
 			raise Exception('Chapter name cannot be empty')
 
 		if text is None:
 			raise Exception('Chapter text cannot be None')
 
-		self.prefix = prefix.strip()
 		self.name = name.strip()	# name of this chapter
-		self.text = text		# text of chapter, one big string
-		self.id = self.prefix + '_' + self.name
-	
-	def get_info_string(self):
-		snippet = ''
-		snippet_length = 20
-		info_string = ''
+		self.text = text			# text of chapter, one big string
 
-		if len(self.text) < snippet_length:
-			snippet = self.text
-		else:
-			snippet = self.text[:snippet_length]
+	def wordcount(self):
+		lines = self.text.split('\n')
 
-		info_string = self.id + ' \"' + snippet + '...\"'
-		info_string += ' (' + str(self.get_word_count()) + ')'
-		
-		return info_string
+		result = 0
 
-	def get_word_count(self):
-	
-		# approximate word count by number of spaces and non-empty lines
-		space_count = self.text.count(' ')
+		for line in lines:
+			if not line:
+				continue
 
-		line_count = len(filter(lambda x: len(x) > 0, self.text.splitlines(False)))
+			if len(line) > 1 and line[:2] == '//':
+				continue
 
-		return space_count + line_count
+			result += line.count(' ') + 1
+
+		return result
 
 class ChapterBatch:
 	def __init__(self):
-		self.chapters = {}		# dict of Chapters, keyed on chapter.id
+		self.chapters = {}		# dict of Chapters, keyed on chapter.name
 
 		self.verbose = True
 	"""		
@@ -60,19 +56,20 @@ class ChapterBatch:
 	def read_in_text_file(self, prefix, filename):
 
 		if self.verbose:
-			print('')
+			log('')
 
 		text_file = open(filename)
 		if not text_file:
 			raise Exception('File not found: ' + filename)
 
 		if self.verbose:
-			print(filename)
+			log(filename)
 			bar = '-' * len(filename)
-			print(bar)
+			log(bar)
 
 		current_chapter = None
 		chapter_count = 0
+		in_italics = False
 
 		for line in text_file:
 
@@ -85,16 +82,39 @@ class ChapterBatch:
 
 				# make a new chapter
 				chapter_count += 1
-				chapter_name = str(chapter_count)
+				chapter_name = prefix + '_' + str(chapter_count)
 
-				# grab the part after the '//'
 				if match is not None and len(match.group(1)) > 0:
-					chapter_name = match.group(1).strip()
+					chapter_name = prefix + '_' + match.group(1).strip()
 
-				current_chapter = Chapter(prefix, chapter_name, '')
+				current_chapter = Chapter(chapter_name, '')
 
 			# regular line, add it to the current chapter
 			if match is None:
+				line = line.strip()
+
+				if len(line) > 0:
+					line = '\t' + line
+
+				old_line = ''
+				while True:
+					old_line = line
+
+					if not in_italics:
+						line = line.replace('*', '\n\\i\n', 1)
+						if line == old_line:
+							break
+							
+						in_italics = True
+					else:
+						line = line.replace('*', '\n\\i0\n', 1)
+						if line == old_line:
+							break
+
+						in_italics = False
+
+				line = line + '\\line\n' # .rtf line ending is \line
+
 				current_chapter.text += line
 
 		# add last chapter to list
@@ -103,112 +123,103 @@ class ChapterBatch:
 
 	def add_chapter(self, chapter):
 
-		# chapter ids must be unique
-		if chapter.id in self.chapters:
-			raise Exception('Multiple chapters named %s' % (chapter.id))
+		# chapter names must be unique
+		if chapter.name in self.chapters:
+			raise Exception('Multiple chapters named %s' % (chapter.name))
 
 		if self.verbose:
-			print(chapter.get_info_string())
+			snippet = ''
+			snippet_length = 20
+			info_string = ''
 
-		self.chapters[chapter.id] = chapter
+			if len(chapter.text) < snippet_length:
+				snippet = chapter.text
+			else:
+				snippet = chapter.text[:snippet_length]
 
-if __name__ == '__main__':
+			info_string = chapter.name + ' \"' + snippet + '...\"'
 
-	# Check arguments
-	if len(sys.argv) < 3:
-	    print('Usage: bookbuilder.py [chapter structure file] [output file] [chapter batch 1] [chapter batch 2] ...')
-	    exit()
+			# approximate word count by number of spaces
+			info_string += ' (' + str(chapter.wordcount()) + ')'
+			log(info_string)
 
-	#
-	# read in chapters
-	#
-	num_batches = len(sys.argv) - 3
-	batch_filenames = {}
-	chapter_batch = ChapterBatch()
+		self.chapters[chapter.name] = chapter
 
-	for i in range(num_batches):
-		batch_filename = sys.argv[3 + i]
+	def wordcount(self):
+		total = 0
 
-		if batch_filename in batch_filenames:
-			raise Exception('Duplicate chapter batch %s' % (batch_filename))
-		batch_filenames[batch_filename] = True
+		for chapter_name in self.chapters:
+			total += self.chapters[chapter_name].wordcount()
 
-		prefix = os.path.splitext(batch_filename)[0]
-		chapter_batch.read_in_text_file(prefix, batch_filename)
+		return total
 
-	#
-	# build book
-	#
-	structure_file = open(sys.argv[1])
-	output_file = open(sys.argv[2], 'w')
-	output_section_names = {}	# keyed on chapter_name
-	output_chapters = []		# list of Chapters
-	last_prefix = None
-	current_chapter = None
+# Check arguments
+if len(sys.argv) < 3:
+    print('Usage: bookbuilder.py [chapter structure file] [output file] [chapter batch 1] [chapter batch 2] ...')
+    exit()
 
-	for line in structure_file:
-		chapter_name = line.strip()
+# clear log file
+with open('log.txt', 'w') as logfile:
+	pass
 
-		# empty line forces a new chapter
-		if not len(chapter_name):
-			current_chapter = None
-			last_prefix = None
-			continue
+# read in chapter batches (one batch per POV character)
+batch_filenames = {}
+chapter_batch = ChapterBatch()
+prev_wordcount = 0
+filenames = sys.argv[3:]
 
-		# check for duplicate chapters
-		if chapter_name in output_section_names:
-			raise Exception('Duplicate chapter name %s' % (chapter_name))
-		output_section_names[chapter_name] = True
+for filename in filenames:
 
-		# check that chapter exists
-		if chapter_name not in chapter_batch.chapters:
-			raise Exception('Chapter not found: %s' % (chapter_name))
+	if filename in batch_filenames:
+		raise Exception('Duplicate chapter batch %s' % (filename))
+	batch_filenames[filename] = True
 
-		# make a new chapter if there is none, or on a new prefix
-		section = chapter_batch.chapters[chapter_name]
-		if current_chapter is None or section.prefix != last_prefix:			
-			current_chapter = Chapter(section.prefix, section.name, section.text)
-			output_chapters.append(current_chapter)
+	prefix = os.path.splitext(filename)[0]
+	chapter_batch.read_in_text_file(prefix, filename)
 
-		# add text to current chapter
-		else:
-			current_chapter.text += section.text
-			
-		last_prefix = section.prefix		
-		
-	# write to file
-	for i, chapter in enumerate(output_chapters):
-		chapter_number = str(i + 1)
-		output_file.write('CHAPTER ' + chapter_number + '\n\n')
-		output_file.write(chapter.text)
-		
-	output_file.close()
+	log('Total: %d' % (chapter_batch.wordcount() - prev_wordcount))
+	prev_wordcount = chapter_batch.wordcount()
 
-	# check for unused chapters
-	missing_chapter_names = []
+# output chapters
+structure_file = open(sys.argv[1])
+output_file = open(sys.argv[2], 'w')
+all_chapter_names = {}
+total_wordcount = 0
 
-	for chapter_name in chapter_batch.chapters:
-		if chapter_name not in output_section_names:
-			missing_chapter_names.append(chapter_name)
+# build book
+output_file.write('{\\rtf1\\ansi\\deff0\n') # start of .rtf file
 
-	#
-	# print info about output file
-	#
-	if True:
-		print('\nOUTPUT: ' + sys.argv[2])
-		with open(sys.argv[2]) as output_file:
-			output = Chapter('output', 'full', output_file.read())
-			
-			print(output.get_info_string())
-			
-		for chapter in output_chapters:
-			partial_id = chapter.id[:20]
-			partial_id += ' ' * (20 - len(partial_id))
-			
-			print(partial_id + ' ' + str(chapter.get_word_count()))
+for i, line in enumerate(structure_file):
+	line = line.strip()
+	words = line.split(' ')
+	label = 'CHAPTER %d' % (i + 1)
 
-		if missing_chapter_names:
-			print('\nMissing Chapters:')
-			for chapter_name in missing_chapter_names:
-				print(chapter_name)
-		
+	if len(words) < 1:
+		continue
+
+	chapter_name = words[0]
+
+	if len(words) >= 2:
+		label += ' (' + words[1] + ')'	  
+
+	# check for duplicate chapters
+	if chapter_name in all_chapter_names:
+		raise Exception('Duplicate chapter name %s' % (chapter_name))
+	all_chapter_names[chapter_name] = True
+
+	# check that chapter exists
+	if chapter_name not in chapter_batch.chapters:
+		raise Exception('Chapter not found: %s' % (chapter_name))
+
+	# add text to output
+	output_file.write(label + '\\line\n')
+	output_file.write('\\line\n')
+	output_file.write(chapter_batch.chapters[chapter_name].text)
+	total_wordcount += chapter_batch.chapters[chapter_name].wordcount()
+
+	log(label + ' ' + chapter_name)
+
+output_file.write('}\n') # end of .rtf file
+
+log('')
+log('Overall Total: %d' % total_wordcount)
