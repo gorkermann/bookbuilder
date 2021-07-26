@@ -45,5 +45,5 @@ luke_fights_vader
 
 ## command
 ```
-> python bookbuilder.py esb_chapters.txt empire_strikes_back.txt luke.txt han.txt vader.txt
+> python bookbuilder.py esb_chapters.txt empire_strikes_back.txt luke.txt han.txt
 ```
